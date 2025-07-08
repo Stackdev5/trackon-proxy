@@ -1,20 +1,27 @@
-private function try_proxy_services($order_data) {
-    $proxy_url = 'https://your-vercel-app.vercel.app/api/proxy'; // Replace with your deployed URL
+const express = require('express');
+const cors = require('cors');
+const request = require('request');
 
-    $response = wp_remote_post($proxy_url, [
-        'body' => json_encode($this->prepare_booking_data($order_data)),
-        'headers' => ['Content-Type' => 'application/json'],
-        'timeout' => 60,
-    ]);
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-    if (!is_wp_error($response)) {
-        $body = wp_remote_retrieve_body($response);
-        $awb = $this->extract_awb_from_response($body);
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-        if ($awb) {
-            return ['success' => true, 'awb_number' => $awb, 'method' => 'vercel_proxy'];
-        }
-    }
+app.post('/proxy', (req, res) => {
+  const trackonUrl = 'http://api.trackon.in/Service.svc/your-endpoint'; // replace with actual Trackon URL
 
-    return ['success' => false, 'message' => 'Vercel proxy failed'];
-}
+  request.post({
+    url: trackonUrl,
+    json: true,
+    body: req.body
+  }, (error, response, body) => {
+    if (error) return res.status(500).json({ error });
+    res.status(response.statusCode).json(body);
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Proxy running on port ${PORT}`);
+});
