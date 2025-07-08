@@ -1,27 +1,18 @@
 const express = require('express');
 const cors = require('cors');
-const request = require('request');
-
+const axios = require('axios');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-app.post('/proxy', (req, res) => {
-  const trackonUrl = 'http://api.trackon.in/Service.svc/your-endpoint'; // replace with actual Trackon URL
-
-  request.post({
-    url: trackonUrl,
-    json: true,
-    body: req.body
-  }, (error, response, body) => {
-    if (error) return res.status(500).json({ error });
-    res.status(response.statusCode).json(body);
-  });
+app.post('/proxy', async (req, res) => {
+  try {
+    const response = await axios.post('http://trackon.in:5455/CrmApi/Crm/UploadPickupRequestWithoutDockNo', req.body);
+    res.status(200).json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: err.toString() });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Proxy running on port ${PORT}`);
-});
+app.listen(3000, () => console.log('Proxy server running on port 3000'));
