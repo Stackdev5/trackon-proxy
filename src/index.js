@@ -1,139 +1,151 @@
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
-
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// Enable CORS for all origins
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
+// Middleware
+app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-// 🟢 Trackon API URLs
-const trackonBookingUrl = 'http://trackon.in:5455/CrmApi/Crm/UploadPickupRequestWithoutDockNo';
-const trackonTrackingUrl = 'https://api.trackon.in/CrmApi/t1/AWBTrackingCustomer';
+// Trackon API endpoints
+const TRACKON_BOOKING_URL = 'http://trackon.in:5455/CrmApi/Crm/UploadPickupRequestWithoutDockNo';
+const TRACKON_TRACKING_URL = 'https://api.trackon.in/CrmApi/t1/AWBTrackingCustomer';
 
-// 📦 Booking proxy route
-app.post("/proxy/booking", async (req, res) => {
-  try {
-    console.log('📦 Booking request received:', JSON.stringify(req.body, null, 2));
-    
-    const response = await axios.post(trackonBookingUrl, req.body, {
-      headers: { 
-        "Content-Type": "application/json",
-        "User-Agent": "Trackon-Proxy-Server"
-      },
-      timeout: 120000 // 2 minutes timeout
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.json({
+        status: 'success',
+        message: 'Trackon Proxy Server is running',
+        endpoints: {
+            booking: '/api/trackon/booking',
+            tracking: '/api/trackon/tracking'
+        },
+        timestamp: new Date().toISOString()
     });
-    
-    console.log('✅ Trackon booking response:', response.data);
-    
-    // Check if response contains AWB number
-    const responseText = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-    const awbMatch = responseText.match(/Docket No\. ?:?\s*(\d+)/);
-    
-    if (awbMatch) {
-      res.json({
-        success: true,
-        awb_number: awbMatch[1],
-        message: 'Shipment created successfully via Render.com proxy',
-        raw_response: response.data
-      });
-    } else {
-      res.json({
-        success: false,
-        message: 'AWB not found in response',
-        raw_response: response.data
-      });
-    }
-    
-  } catch (error) {
-    console.error('❌ Booking error:', error.message);
-    
-    if (error.response) {
-      console.error('Error response:', error.response.data);
-      res.status(error.response.status).json({ 
-        success: false,
-        error: "Booking failed", 
-        details: error.response.data,
-        status: error.response.status
-      });
-    } else {
-      res.status(500).json({ 
-        success: false,
-        error: "Network error", 
-        details: error.message 
-      });
-    }
-  }
 });
 
-// 📍 Tracking proxy route
-app.get("/proxy/tracking", async (req, res) => {
-  try {
-    const { AWBNo, AppKey, userID, Password } = req.query;
-    
-    if (!AWBNo || !AppKey || !userID || !Password) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing required parameters"
-      });
+// Trackon Booking API Proxy
+app.post('/api/trackon/booking', async (req, res) => {
+    try {
+        console.log('Booking request received:', JSON.stringify(req.body, null, 2));
+        
+        // Validate required fields
+        const requiredFields = ['Appkey', 'userId', 'password', 'ActionType'];
+        for (const field of requiredFields) {
+            if (!req.body[field]) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Missing required field: ${field}`
+                });
+            }
+        }
+        
+        // Forward request to Trackon API
+        const response = await axios.post(TRACKON_BOOKING_URL, req.body, {
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Trackon-Proxy-Server/1.0'
+            },
+            timeout: 30000 // 30 seconds timeout
+        });
+        
+        console.log('Trackon booking response:', response.data);
+        
+        // Parse AWB number from response
+        let awbNumber = null;
+        if (typeof response.data === 'string') {
+            const awbMatch = response.data.match(/Docket No\. ?:?\s*(\d+)/);
+            if (awbMatch) {
+                awbNumber = awbMatch[1];
+            }
+        }
+        
+        res.json({
+            success: true,
+            data: {
+                awb_number: awbNumber,
+                raw_response: response.data,
+                status_code: response.status
+            }
+        });
+        
+    } catch (error) {
+        console.error('Booking API error:', error.message);
+        
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            details: error.response ? error.response.data : null
+        });
     }
-    
-    const trackingUrl = `${trackonTrackingUrl}?AWBNo=${AWBNo}&AppKey=${AppKey}&userID=${userID}&Password=${Password}`;
-    
-    console.log('📍 Tracking request for AWB:', AWBNo);
-    
-    const response = await axios.get(trackingUrl, {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": "Trackon-Proxy-Server"
-      },
-      timeout: 60000
+});
+
+// Trackon Tracking API Proxy
+app.get('/api/trackon/tracking', async (req, res) => {
+    try {
+        const { AWBNo, AppKey, userID, Password } = req.query;
+        
+        if (!AWBNo || !AppKey || !userID || !Password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required parameters: AWBNo, AppKey, userID, Password'
+            });
+        }
+        
+        const trackingUrl = `${TRACKON_TRACKING_URL}?AWBNo=${AWBNo}&AppKey=${AppKey}&userID=${userID}&Password=${Password}`;
+        
+        const response = await axios.get(trackingUrl, {
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'User-Agent': 'Trackon-Proxy-Server/1.0'
+            },
+            timeout: 30000
+        });
+        
+        console.log('Tracking response:', response.data);
+        
+        res.json({
+            success: true,
+            data: response.data
+        });
+        
+    } catch (error) {
+        console.error('Tracking API error:', error.message);
+        
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            details: error.response ? error.response.data : null
+        });
+    }
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+    console.error('Server error:', error);
+    res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
     });
-    
-    console.log('✅ Tracking response received');
-    res.json(response.data);
-    
-  } catch (error) {
-    console.error('❌ Tracking error:', error.message);
-    res.status(500).json({ 
-      success: false,
-      error: "Tracking failed", 
-      details: error.message 
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Endpoint not found',
+        available_endpoints: [
+            'GET /',
+            'POST /api/trackon/booking',
+            'GET /api/trackon/tracking'
+        ]
     });
-  }
 });
 
-// 🏠 Health check route
-app.get("/", (req, res) => {
-  res.json({
-    status: "🚀 Trackon Proxy Server Running",
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      booking: "/proxy/booking (POST)",
-      tracking: "/proxy/tracking (GET)"
-    }
-  });
-});
-
-// 🔍 Health check route
-app.get("/health", (req, res) => {
-  res.json({
-    status: "healthy",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 🚀 Start server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Trackon Proxy Server running on port ${PORT}`);
-  console.log(`📦 Booking endpoint: /proxy/booking`);
-  console.log(`📍 Tracking endpoint: /proxy/tracking`);
+    console.log(`Trackon Proxy Server running on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/`);
 });
