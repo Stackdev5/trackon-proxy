@@ -1,31 +1,47 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
 
 const app = express();
-app.use(cors());
+const PORT = process.env.PORT || 10000;
+
+app.use(cors()); // Enables CORS for frontend requests
 app.use(express.json());
 
-const TRACKON_BOOKING_URL = 'http://trackon.in:5455/CrmApi/Crm/UploadPickupRequestWithoutDockNo';
+// 🟢 Trackon API URLs
+const trackonBookingUrl = 'http://trackon.in:5455/CrmApi/Crm/UploadPickupRequestWithoutDockNo';
+const trackonTrackingUrl = 'https://api.trackon.in/CrmApi/t1/AWBTrackingCustomer';
 
-app.post('/proxy', async (req, res) => {
+// 📦 Booking proxy route
+app.post("/proxy/booking", async (req, res) => {
   try {
-    const response = await axios.post(TRACKON_BOOKING_URL, req.body, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
+    const response = await axios.post(trackonBookingUrl, req.body, {
+      headers: { "Content-Type": "application/json" }
     });
-    res.status(200).json(response.data);
-  } catch (err) {
-    res.status(500).json({ error: err.toString() });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: "Booking failed", details: error.message });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Trackon Proxy Server Running');
+// 📦 Tracking proxy route
+app.post("/proxy/tracking", async (req, res) => {
+  try {
+    const response = await axios.post(trackonTrackingUrl, req.body, {
+      headers: { "Content-Type": "application/json" }
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: "Tracking failed", details: error.message });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
+// 🏠 Default route
+app.get("/", (req, res) => {
+  res.send("Trackon Proxy Server Running");
+});
+
+// 🚀 Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
